@@ -4,6 +4,7 @@ import (
 	"context"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -210,8 +211,8 @@ func (m *Mock) Ticker(d time.Duration) *Ticker {
 		c:    ch,
 		mock: m,
 		d:    d,
-		next: m.now.Add(d),
 	}
+	t.next.Store(m.now.Add(d))
 	m.timers = append(m.timers, (*internalTicker)(t))
 	return t
 }
@@ -327,7 +328,7 @@ type Ticker struct {
 	C      <-chan time.Time
 	c      chan time.Time
 	ticker *time.Ticker  // realtime impl, if set
-	next   time.Time     // next tick time
+	next   atomic.Value  // next tick time.Time
 	mock   *Mock         // mock clock, if set
 	d      time.Duration // time between ticks
 }
@@ -354,18 +355,20 @@ func (t *Ticker) Reset(dur time.Duration) {
 	defer t.mock.mu.Unlock()
 
 	t.d = dur
-	t.next = t.mock.now.Add(dur)
+	t.next.Store(t.mock.now.Add(dur))
 }
 
 type internalTicker Ticker
 
-func (t *internalTicker) Next() time.Time { return t.next }
+func (t *internalTicker) Next() time.Time {
+	return t.next.Load().(time.Time)
+}
 func (t *internalTicker) Tick(now time.Time) {
 	select {
 	case t.c <- now:
 	default:
 	}
-	t.next = now.Add(t.d)
+	t.next.Store(now.Add(t.d))
 	gosched()
 }
 
